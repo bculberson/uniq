@@ -1,0 +1,8 @@
+package: github.com/bculberson/uniq
+import:
+- package: gopkg.in/alecthomas/kingpin.v2
+  version: ^2.2.3
+- package: github.com/boltdb/bolt
+  version: ^1.3.0
+- package: github.com/hashicorp/raft
+- package: github.com/hashicorp/raft-boltdb

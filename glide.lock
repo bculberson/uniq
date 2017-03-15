@@ -1,0 +1,28 @@
+hash: f968aeb07e5c65bf153dd9a31aa1405a4fb1d1809d08696cb78319c28b8418fb
+updated: 2017-03-14T21:51:25.95036463-06:00
+imports:
+- name: github.com/alecthomas/template
+  version: a0175ee3bccc567396460bf5acd36800cb10c49c
+  subpackages:
+  - parse
+- name: github.com/alecthomas/units
+  version: 2efee857e7cfd4f3d0138cc3cbb1b4966962b93a
+- name: github.com/armon/go-metrics
+  version: 93f237eba9b0602f3e73710416558854a81d9337
+- name: github.com/boltdb/bolt
+  version: 583e8937c61f1af6513608ccc75c97b6abdf4ff9
+- name: github.com/hashicorp/go-msgpack
+  version: fa3f63826f7c23912c15263591e65d54d080b458
+  subpackages:
+  - codec
+- name: github.com/hashicorp/raft
+  version: 5f09c4ffdbcd2a53768e78c47717415de12b6728
+- name: github.com/hashicorp/raft-boltdb
+  version: df631556b57507bd5d0ed4f87468fd93ab025bef
+- name: golang.org/x/sys
+  version: 99f16d856c9836c42d24e7ab64ea72916925fa97
+  subpackages:
+  - unix
+- name: gopkg.in/alecthomas/kingpin.v2
+  version: e9044be3ab2a8e11d4e1f418d12f0790d57e8d70
+testImports: []
