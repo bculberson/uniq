@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	joinAddress = kingpin.Flag("join", "Address to join ex: `127.0.0.1:11111`").String()
+	joinAddress = kingpin.Flag("join", "Address to join ex: `127.0.0.1:11110`").String()
 	singleMode  = kingpin.Flag("singlemode", "Single mode").Short('s').Bool()
 	storagePath = kingpin.Flag("storagepath", "Storage path").Default("/tmp").String()
 	httpAddress = kingpin.Flag("haddr", "Address for HTTP binding").Default("127.0.0.1:11111").String()

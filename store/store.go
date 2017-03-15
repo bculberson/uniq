@@ -3,13 +3,13 @@ package store
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"time"
+	"os"
 	"log"
 	"net"
-	"os"
+	"io"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/hashicorp/raft"
@@ -211,23 +211,28 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 	return response
 }
 
+type fsmSnapshot struct {
+	Store map[string]cnsStoreValue
+}
+
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
-	fmt.Printf("Snapshot running")
+	log.Printf("Snapshot running")
 	result := &fsmSnapshot{}
-	result.store = make(map[string]cnsStoreValue)
+	result.Store = make(map[string]cnsStoreValue)
 	err := f.uniqStore.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("uniques"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var storageValue cnsStoreValue
 			if err := json.Unmarshal(v, &storageValue); err != nil {
+				log.Printf("Error in Snapshot %v\n", err)
 				return err
 			}
 
 			exp := time.Unix(storageValue.Expiration, 0)
 			if exp.After(time.Now()) {
 				key := string(k)
-				result.store[key] = storageValue
+				result.Store[key] = storageValue
 			}
 		}
 		return nil
@@ -248,6 +253,7 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 			if exp.After(time.Now()) {
 				storageValueInBytes, err := json.Marshal(storageValue)
 				if err != nil {
+					log.Printf("Error in Restore %v\n", err)
 					return err
 				}
 				b.Put([]byte(k), storageValueInBytes)
@@ -258,23 +264,22 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	return err
 }
 
-type fsmSnapshot struct {
-	store map[string]cnsStoreValue
-}
-
 func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	fmt.Printf("Persist running")
 	err := func() error {
-		b, err := json.Marshal(f.store)
+		b, err := json.Marshal(f.Store)
 		if err != nil {
+			log.Printf("Error in Persist Marshal %v\n", err)
 			return err
 		}
 
 		if _, err := sink.Write(b); err != nil {
+			log.Printf("Error in Persist Write %v\n", err)
 			return err
 		}
 
 		if err := sink.Close(); err != nil {
+			log.Printf("Error in Persist Close %v\n", err)
 			return err
 		}
 
