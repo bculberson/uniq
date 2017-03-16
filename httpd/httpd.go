@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"encoding/json"
 )
 
 var logger = log.New(os.Stderr, "[httpd] ", log.LstdFlags)
@@ -62,10 +63,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/check") {
 		if s.store.IsLeader() {
 			w.WriteHeader(http.StatusOK)
-			return
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/join") {
 		r.ParseForm()
@@ -73,9 +72,26 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := s.store.Join(addrParam)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
 		} else {
 			w.WriteHeader(http.StatusOK)
+		}
+	} else if strings.HasPrefix(r.URL.Path, "/load") {
+		r.ParseForm()
+		concurrencyParam := r.Form.Get("concurrency")
+		if concurrencyParam == "" {
+			concurrencyParam = "100"
+		}
+		numberParam := r.Form.Get("number")
+		if numberParam == "" {
+			concurrencyParam = "1000"
+		}
+		results, err := s.startLoadTesting(concurrencyParam, numberParam)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+			output, _ := json.Marshal(results)
+			w.Write(output)
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/cns") {
 		r.ParseForm()
@@ -100,17 +116,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		exists, value, err := s.store.CheckNSet(keyParam, valueParam, time.Now().Add(duration))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
 		} else if exists {
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(value))
 			w.Write([]byte("\n"))
-			return
 		} else {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(value))
 			w.Write([]byte("\n"))
-			return
 		}
 	} else {
 		w.WriteHeader(http.StatusNotFound)

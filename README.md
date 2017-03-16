@@ -25,6 +25,11 @@ bar
 
 ```
 
+To simulate data and load:
+
+```sh
+$ curl -X POST -i "http://localhost:11111/load?concurrency=100&number=10000"
+```
 
 
 

@@ -1,19 +1,19 @@
 package store
 
 import (
-	"encoding/json"
 	"fmt"
-	"time"
-	"os"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
-	"io"
+	"os"
 	"path/filepath"
-	"strconv"
+	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
+	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -21,14 +21,9 @@ const (
 	raftTimeout         = 10 * time.Second
 )
 
-var logger = log.New(os.Stderr, "[store] ", log.LstdFlags)
-
-type command struct {
-	Op         string `json:"op,omitempty"`
-	Key        string `json:"key,omitempty"`
-	Value      string `json:"value,omitempty"`
-	Expiration string `json:"expiration,omitempty"`
-}
+var (
+	logger          = log.New(os.Stderr, "[store] ", log.LstdFlags)
+)
 
 type Store struct {
 	storagePath string
@@ -110,13 +105,14 @@ func (s *Store) CheckNSet(key string, value string, expiration time.Time) (bool,
 		return false, "", fmt.Errorf("not leader")
 	}
 
-	c := &command{
-		Op:         "cns",
+	msg := &MessageValue{
+		Operation:  MessageValue_CAS,
 		Key:        key,
 		Value:      value,
-		Expiration: strconv.FormatInt(expiration.Unix(), 10),
+		Expiration: expiration.Unix(),
 	}
-	b, err := json.Marshal(c)
+
+	b, err := proto.Marshal(msg)
 	if err != nil {
 		return false, "", err
 	}
@@ -149,16 +145,11 @@ type fsmResponse struct {
 	error  error
 }
 
-type cnsStoreValue struct {
-	Value      string `json:"value,omitempty"`
-	Expiration int64  `json:"exp,omitempty"`
-}
-
 func (f *fsm) Apply(l *raft.Log) interface{} {
-	var c command
+	msg := &MessageValue{}
 	response := &fsmResponse{}
 
-	if err := json.Unmarshal(l.Data, &c); err != nil {
+	if err := proto.Unmarshal(l.Data, msg); err != nil {
 		return &fsmResponse{error: fmt.Errorf("failed to unmarshal command: %s", err.Error())}
 	}
 
@@ -169,38 +160,35 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 	}
 	defer tx.Rollback()
 
-	if c.Op == "cns" {
+	if msg.Operation == MessageValue_CAS {
 		b := tx.Bucket([]byte("uniques"))
-		v := b.Get([]byte(c.Key))
+		v := b.Get([]byte(msg.Key))
 		if v == nil {
-			unixTime, _ := strconv.ParseInt(c.Expiration, 10, 64)
-			expiration := time.Unix(unixTime, 0)
+			expiration := time.Unix(msg.Expiration, 0)
 			if expiration.After(time.Now()) {
-				log.Printf("Adding %s key to db with value %s", c.Key, c.Value)
-				storageValue := &cnsStoreValue{Expiration: unixTime, Value: c.Value}
-				storageValueInBytes, err := json.Marshal(storageValue)
+				storageValue := &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
+
+				storageValueInBytes, err := proto.Marshal(storageValue)
 				if err != nil {
 					response.error = err
 					return response
 				}
-				b.Put([]byte(c.Key), storageValueInBytes)
-				response.value = c.Value
+				b.Put([]byte(msg.Key), storageValueInBytes)
+				response.value = msg.Value
 			}
 		} else {
-			var storageValue cnsStoreValue
-			if err := json.Unmarshal(v, &storageValue); err != nil {
+			storageValue := &UniqueStorageValue{}
+			if err := proto.Unmarshal(v, storageValue); err != nil {
 				response.error = fmt.Errorf("failed to unmarshal data: %s", err.Error())
 				return response
 			}
 
 			exp := time.Unix(storageValue.Expiration, 0)
 			if exp.After(time.Now()) {
-				log.Printf("Key %s exists, date %v after %v", c.Key, exp, time.Now())
 				response.exists = true
 				response.value = storageValue.Value
 			} else {
-				log.Printf("Key %s exists, date %v before %v", c.Key, exp, time.Now())
-				b.Delete([]byte(c.Key))
+				b.Delete([]byte(msg.Key))
 			}
 		}
 	}
@@ -211,20 +199,18 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 	return response
 }
 
-type fsmSnapshot struct {
-	Store map[string]cnsStoreValue
-}
-
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	log.Printf("Snapshot running")
-	result := &fsmSnapshot{}
-	result.Store = make(map[string]cnsStoreValue)
+	result := &UniqueStorage{}
+	result.Items = make(map[string]*UniqueStorageValue)
+
+
 	err := f.uniqStore.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("uniques"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var storageValue cnsStoreValue
-			if err := json.Unmarshal(v, &storageValue); err != nil {
+			storageValue := &UniqueStorageValue{}
+			if err := proto.Unmarshal(v, storageValue); err != nil {
 				log.Printf("Error in Snapshot %v\n", err)
 				return err
 			}
@@ -232,7 +218,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 			exp := time.Unix(storageValue.Expiration, 0)
 			if exp.After(time.Now()) {
 				key := string(k)
-				result.Store[key] = storageValue
+				result.Items[key] = storageValue
 			}
 		}
 		return nil
@@ -242,16 +228,29 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	fmt.Printf("Restore running")
-	data := make(map[string]cnsStoreValue)
-	if err := json.NewDecoder(rc).Decode(&data); err != nil {
+	data := &UniqueStorage{}
+	bytes, err := ioutil.ReadAll(rc)
+	if err != nil {
 		return err
 	}
-	err := f.uniqStore.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("uniques"))
-		for k, storageValue := range data {
+	if err := proto.Unmarshal(bytes, data); err != nil {
+		return err
+	}
+	err = f.uniqStore.Update(func(tx *bolt.Tx) error {
+		var err error
+		var b *bolt.Bucket
+		if err = tx.DeleteBucket([]byte("uniques")); err != nil {
+			return err
+		}
+		b, err = tx.CreateBucketIfNotExists([]byte("uniques"))
+		if err != nil {
+			return err
+		}
+
+		for k, storageValue := range data.Items {
 			exp := time.Unix(storageValue.Expiration, 0)
 			if exp.After(time.Now()) {
-				storageValueInBytes, err := json.Marshal(storageValue)
+				storageValueInBytes, err := proto.Marshal(storageValue)
 				if err != nil {
 					log.Printf("Error in Restore %v\n", err)
 					return err
@@ -264,10 +263,10 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	return err
 }
 
-func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
+func (f *UniqueStorage) Persist(sink raft.SnapshotSink) error {
 	fmt.Printf("Persist running")
 	err := func() error {
-		b, err := json.Marshal(f.Store)
+		b, err := proto.Marshal(f)
 		if err != nil {
 			log.Printf("Error in Persist Marshal %v\n", err)
 			return err
@@ -294,4 +293,4 @@ func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	return nil
 }
 
-func (f *fsmSnapshot) Release() {}
+func (f *UniqueStorage) Release() {}
