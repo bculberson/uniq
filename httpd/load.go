@@ -88,7 +88,7 @@ func (s *Service) load(results *loadResults) error {
 		if results.MinimumBatchTime == 0 || batchDuration.Seconds() < results.MinimumBatchTime {
 			results.MinimumBatchTime = batchDuration.Seconds()
 		}
-		if results.MaximumBatchTime == 0 || batchDuration.Seconds() > results.MinimumBatchTime {
+		if results.MaximumBatchTime == 0 || batchDuration.Seconds() > results.MaximumBatchTime {
 			results.MaximumBatchTime = batchDuration.Seconds()
 		}
 	}
