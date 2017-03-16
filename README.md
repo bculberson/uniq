@@ -29,6 +29,23 @@ To simulate data and load:
 
 ```sh
 $ curl -X POST -i "http://localhost:11111/load?concurrency=100&number=10000"
+HTTP/1.1 200 OK
+Date: Thu, 16 Mar 2017 18:12:49 GMT
+Content-Length: 247
+Content-Type: text/plain; charset=utf-8
+
+{
+        "MinimumBatchTime": 0.0032623810000000004,
+        "MaximumBatchTime": 0.007492521,
+        "AverageBatchTime": 0.008941228470000001,
+        "TotalTime": 0.8941228470000001,
+        "Batches": 100,
+        "BatchSize": 100,
+        "Concurrency": 100,
+        "Errors": 0,
+        "Collisions": 0
+}
+
 ```
 
 
