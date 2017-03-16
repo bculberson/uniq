@@ -90,8 +90,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		} else {
 			w.WriteHeader(http.StatusOK)
-			output, _ := json.Marshal(results)
+			output, _ := json.MarshalIndent(results, "", "\t")
 			w.Write(output)
+			w.Write([]byte("\n"))
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/cns") {
 		r.ParseForm()
