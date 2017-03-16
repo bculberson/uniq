@@ -1,5 +1,5 @@
 # uniq
-go service to guarantee uniqueness with expirations, backed by boltdb
+go service to guarantee uniqueness with expirations, in memory storage
 
 uses raft for leader election and haproxy for leader routing/load balancing
 

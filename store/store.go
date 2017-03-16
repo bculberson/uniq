@@ -8,12 +8,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/golang/protobuf/proto"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
-	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -22,7 +22,13 @@ const (
 )
 
 var (
-	logger          = log.New(os.Stderr, "[store] ", log.LstdFlags)
+	logger        = log.New(os.Stderr, "[store] ", log.LstdFlags)
+	storageUnique = struct {
+		sync.RWMutex
+		m map[string]*UniqueStorageValue
+	}{
+		m: make(map[string]*UniqueStorageValue),
+	}
 )
 
 type Store struct {
@@ -31,8 +37,7 @@ type Store struct {
 	singleMode  bool
 	currentLdr  string
 
-	uniqStore *bolt.DB
-	raft      *raft.Raft
+	raft *raft.Raft
 }
 
 // New returns a new Store.
@@ -41,23 +46,6 @@ func New(storagePath string, raftAddress string, singleMode bool) *Store {
 }
 
 func (s *Store) Open() error {
-	keyStore, err := bolt.Open(filepath.Join(s.storagePath, "raft.uniques.db"), 0644, nil)
-	if err != nil {
-		return fmt.Errorf("new bolt store: %s", err)
-	}
-	err = keyStore.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("uniques"))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("new bolt store: %s", err)
-	}
-
-	s.uniqStore = keyStore
-
 	config := raft.DefaultConfig()
 
 	addr, err := net.ResolveTCPAddr("tcp", s.raftAddress)
@@ -153,81 +141,51 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 		return &fsmResponse{error: fmt.Errorf("failed to unmarshal command: %s", err.Error())}
 	}
 
-	tx, err := f.uniqStore.Begin(true)
-	if err != nil {
-		response.error = err
-		return response
-	}
-	defer tx.Rollback()
-
 	if msg.Operation == MessageValue_CAS {
-		b := tx.Bucket([]byte("uniques"))
-		v := b.Get([]byte(msg.Key))
-		if v == nil {
-			expiration := time.Unix(msg.Expiration, 0)
-			if expiration.After(time.Now()) {
-				storageValue := &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
+		storageUnique.RLock()
+		storageValue, ok := storageUnique.m[msg.Key]
+		var expiration time.Time
+		if ok {
+			expiration = time.Unix(msg.Expiration, 0)
+		}
+		storageUnique.RUnlock()
 
-				storageValueInBytes, err := proto.Marshal(storageValue)
-				if err != nil {
-					response.error = err
-					return response
-				}
-				b.Put([]byte(msg.Key), storageValueInBytes)
+		if !ok {
+			if msg.Expiration > time.Now().Unix() {
+				storageUnique.Lock()
+				storageUnique.m[msg.Key] = &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
+				storageUnique.Unlock()
 				response.value = msg.Value
 			}
 		} else {
-			storageValue := &UniqueStorageValue{}
-			if err := proto.Unmarshal(v, storageValue); err != nil {
-				response.error = fmt.Errorf("failed to unmarshal data: %s", err.Error())
-				return response
-			}
-
-			exp := time.Unix(storageValue.Expiration, 0)
-			if exp.After(time.Now()) {
+			if expiration.After(time.Now()) {
 				response.exists = true
 				response.value = storageValue.Value
-			} else {
-				b.Delete([]byte(msg.Key))
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		response.error = err
-		return response
 	}
 	return response
 }
 
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	log.Printf("Snapshot running")
+
 	result := &UniqueStorage{}
 	result.Items = make(map[string]*UniqueStorageValue)
 
+	storageUnique.RLock()
+	defer storageUnique.RUnlock()
 
-	err := f.uniqStore.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("uniques"))
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			storageValue := &UniqueStorageValue{}
-			if err := proto.Unmarshal(v, storageValue); err != nil {
-				log.Printf("Error in Snapshot %v\n", err)
-				return err
-			}
+	for k, item := range storageUnique.m {
+		result.Items[k] = &UniqueStorageValue{Expiration: item.Expiration, Value: item.Value}
+	}
 
-			exp := time.Unix(storageValue.Expiration, 0)
-			if exp.After(time.Now()) {
-				key := string(k)
-				result.Items[key] = storageValue
-			}
-		}
-		return nil
-	})
-	return result, err
+	return result, nil
 }
 
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	fmt.Printf("Restore running")
+
 	data := &UniqueStorage{}
 	bytes, err := ioutil.ReadAll(rc)
 	if err != nil {
@@ -236,30 +194,17 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	if err := proto.Unmarshal(bytes, data); err != nil {
 		return err
 	}
-	err = f.uniqStore.Update(func(tx *bolt.Tx) error {
-		var err error
-		var b *bolt.Bucket
-		if err = tx.DeleteBucket([]byte("uniques")); err != nil {
-			return err
-		}
-		b, err = tx.CreateBucketIfNotExists([]byte("uniques"))
-		if err != nil {
-			return err
-		}
 
-		for k, storageValue := range data.Items {
-			exp := time.Unix(storageValue.Expiration, 0)
-			if exp.After(time.Now()) {
-				storageValueInBytes, err := proto.Marshal(storageValue)
-				if err != nil {
-					log.Printf("Error in Restore %v\n", err)
-					return err
-				}
-				b.Put([]byte(k), storageValueInBytes)
-			}
+	storageUnique.Lock()
+	defer storageUnique.Unlock()
+
+	storageUnique.m = make(map[string]*UniqueStorageValue)
+	for k, storageValue := range data.Items {
+		exp := time.Unix(storageValue.Expiration, 0)
+		if exp.After(time.Now()) {
+			storageUnique.m[k] = storageValue
 		}
-		return nil
-	})
+	}
 	return err
 }
 
