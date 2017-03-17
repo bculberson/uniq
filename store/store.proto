@@ -3,7 +3,7 @@ package store;
 
 message UniqueStorageValue {
     string value = 1;
-    int64 expiration = 2;
+    uint32 expiration = 2;
 }
 
 message MessageValue {
@@ -11,7 +11,7 @@ message MessageValue {
     OPERATION operation = 1;
     string key = 2;
     string value = 3;
-    int64 expiration = 4;
+    uint32 expiration = 4;
 }
 
 message UniqueStorage {

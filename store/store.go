@@ -97,7 +97,7 @@ func (s *Store) CheckNSet(key string, value string, expiration time.Time) (bool,
 		Operation:  MessageValue_CAS,
 		Key:        key,
 		Value:      value,
-		Expiration: expiration.Unix(),
+		Expiration: uint32(expiration.Unix()),
 	}
 
 	b, err := proto.Marshal(msg)
@@ -146,12 +146,12 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 		storageValue, ok := storageUnique.m[msg.Key]
 		var expiration time.Time
 		if ok {
-			expiration = time.Unix(msg.Expiration, 0)
+			expiration = time.Unix(int64(msg.Expiration), 0)
 		}
 		storageUnique.RUnlock()
 
 		if !ok {
-			if msg.Expiration > time.Now().Unix() {
+			if msg.Expiration > uint32(time.Now().Unix()) {
 				storageUnique.Lock()
 				storageUnique.m[msg.Key] = &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
 				storageUnique.Unlock()
@@ -200,7 +200,7 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 
 	storageUnique.m = make(map[string]*UniqueStorageValue)
 	for k, storageValue := range data.Items {
-		exp := time.Unix(storageValue.Expiration, 0)
+		exp := time.Unix(int64(storageValue.Expiration), 0)
 		if exp.After(time.Now()) {
 			storageUnique.m[k] = storageValue
 		}
