@@ -47,6 +47,8 @@ func New(storagePath string, raftAddress string, singleMode bool) *Store {
 
 func (s *Store) Open() error {
 	config := raft.DefaultConfig()
+	config.SnapshotInterval = time.Hour
+	config.SnapshotThreshold = 10000000
 
 	addr, err := net.ResolveTCPAddr("tcp", s.raftAddress)
 	if err != nil {
@@ -142,18 +144,21 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 	}
 
 	if msg.Operation == MessageValue_CAS {
+		var exp uint32
+
 		storageUnique.RLock()
 		storageValue, ok := storageUnique.m[msg.Key]
-		var expiration time.Time
 		if ok {
-			expiration = time.Unix(int64(msg.Expiration), 0)
+			exp = msg.Expiration
 		}
 		storageUnique.RUnlock()
+		expiration := time.Unix(int64(exp), 0)
 
 		if !ok {
 			if msg.Expiration > uint32(time.Now().Unix()) {
+				val := &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
 				storageUnique.Lock()
-				storageUnique.m[msg.Key] = &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
+				storageUnique.m[msg.Key] = val
 				storageUnique.Unlock()
 				response.value = msg.Value
 			}
@@ -168,8 +173,6 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 }
 
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
-	log.Printf("Snapshot running")
-
 	result := &UniqueStorage{}
 	result.Items = make(map[string]*UniqueStorageValue)
 
@@ -184,7 +187,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 }
 
 func (f *fsm) Restore(rc io.ReadCloser) error {
-	fmt.Printf("Restore running")
+	log.Printf("Restore running\n")
 
 	data := &UniqueStorage{}
 	bytes, err := ioutil.ReadAll(rc)
