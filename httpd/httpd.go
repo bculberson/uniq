@@ -5,9 +5,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
-	"encoding/json"
+	_ "net/http/pprof"
 )
 
 var logger = log.New(os.Stderr, "[httpd] ", log.LstdFlags)
@@ -32,20 +31,11 @@ func New(addr string, store Store) *Service {
 }
 
 func (s *Service) Start() error {
-	server := http.Server{
-		Handler: s,
-	}
-
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-	s.ln = ln
-
-	http.Handle("/", s)
-
 	go func() {
-		err := server.Serve(s.ln)
+		http.HandleFunc("/check", s.checkHandler)
+		http.HandleFunc("/join", s.joinHandler)
+		http.HandleFunc("/cns", s.cnsHandler)
+		err := http.ListenAndServe(s.addr, nil)
 		if err != nil {
 			logger.Fatalf("HTTP serve: %s", err)
 		}
@@ -59,74 +49,56 @@ func (s *Service) Close() {
 	return
 }
 
-func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/check") {
-		if s.store.IsLeader() {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	} else if strings.HasPrefix(r.URL.Path, "/join") {
-		r.ParseForm()
-		addrParam := r.Form.Get("addr")
-		err := s.store.Join(addrParam)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-	} else if strings.HasPrefix(r.URL.Path, "/load") {
-		r.ParseForm()
-		concurrencyParam := r.Form.Get("concurrency")
-		if concurrencyParam == "" {
-			concurrencyParam = "100"
-		}
-		numberParam := r.Form.Get("number")
-		if numberParam == "" {
-			concurrencyParam = "1000"
-		}
-		results, err := s.startLoadTesting(concurrencyParam, numberParam)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else {
-			w.WriteHeader(http.StatusOK)
-			output, _ := json.MarshalIndent(results, "", "\t")
-			w.Write(output)
-			w.Write([]byte("\n"))
-		}
-	} else if strings.HasPrefix(r.URL.Path, "/cns") {
-		r.ParseForm()
-		keyParam := r.Form.Get("key")
-		if keyParam == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("key id required\n"))
-			return
-		}
-		durationParam := r.Form.Get("duration")
-		if durationParam == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("duration id required\n"))
-			return
-		}
-		duration, err := time.ParseDuration(durationParam)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		valueParam := r.Form.Get("value")
-		exists, value, err := s.store.CheckNSet(keyParam, valueParam, time.Now().Add(duration))
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else if exists {
-			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(value))
-			w.Write([]byte("\n"))
-		} else {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(value))
-			w.Write([]byte("\n"))
-		}
+func (s *Service) checkHandler(w http.ResponseWriter, r *http.Request) {
+	if s.store.IsLeader() {
+		w.WriteHeader(http.StatusOK)
 	} else {
-		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
+
+func (s *Service) joinHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	addrParam := r.Form.Get("addr")
+	err := s.store.Join(addrParam)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func (s *Service) cnsHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	keyParam := r.Form.Get("key")
+	if keyParam == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("key id required\n"))
+		return
+	}
+	durationParam := r.Form.Get("duration")
+	if durationParam == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("duration id required\n"))
+		return
+	}
+	duration, err := time.ParseDuration(durationParam)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	valueParam := r.Form.Get("value")
+	exists, value, err := s.store.CheckNSet(keyParam, valueParam, time.Now().Add(duration))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else if exists {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(value))
+		w.Write([]byte("\n"))
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(value))
+		w.Write([]byte("\n"))
+	}
+}
+

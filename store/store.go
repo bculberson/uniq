@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"encoding/json"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
 )
@@ -24,7 +24,7 @@ const (
 var (
 	logger        = log.New(os.Stderr, "[store] ", log.LstdFlags)
 	storageUnique = struct {
-		sync.RWMutex
+		sync.Mutex
 		m map[string]*UniqueStorageValue
 	}{
 		m: make(map[string]*UniqueStorageValue),
@@ -102,7 +102,7 @@ func (s *Store) CheckNSet(key string, value string, expiration time.Time) (bool,
 		Expiration: uint32(expiration.Unix()),
 	}
 
-	b, err := proto.Marshal(msg)
+	b, err := json.Marshal(msg)
 	if err != nil {
 		return false, "", err
 	}
@@ -139,30 +139,22 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 	msg := &MessageValue{}
 	response := &fsmResponse{}
 
-	if err := proto.Unmarshal(l.Data, msg); err != nil {
+	if err := json.Unmarshal(l.Data, msg); err != nil {
 		return &fsmResponse{error: fmt.Errorf("failed to unmarshal command: %s", err.Error())}
 	}
 
 	if msg.Operation == MessageValue_CAS {
-		var exp uint32
-
-		storageUnique.RLock()
+		storageUnique.Lock()
+		defer storageUnique.Unlock()
 		storageValue, ok := storageUnique.m[msg.Key]
-		if ok {
-			exp = msg.Expiration
-		}
-		storageUnique.RUnlock()
-		expiration := time.Unix(int64(exp), 0)
-
 		if !ok {
 			if msg.Expiration > uint32(time.Now().Unix()) {
 				val := &UniqueStorageValue{Expiration: msg.Expiration, Value: msg.Value}
-				storageUnique.Lock()
 				storageUnique.m[msg.Key] = val
-				storageUnique.Unlock()
 				response.value = msg.Value
 			}
 		} else {
+			expiration := time.Unix(int64(msg.Expiration), 0)
 			if expiration.After(time.Now()) {
 				response.exists = true
 				response.value = storageValue.Value
@@ -176,8 +168,8 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	result := &UniqueStorage{}
 	result.Items = make(map[string]*UniqueStorageValue)
 
-	storageUnique.RLock()
-	defer storageUnique.RUnlock()
+	storageUnique.Lock()
+	defer storageUnique.Unlock()
 
 	for k, item := range storageUnique.m {
 		result.Items[k] = &UniqueStorageValue{Expiration: item.Expiration, Value: item.Value}
@@ -194,7 +186,7 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	if err != nil {
 		return err
 	}
-	if err := proto.Unmarshal(bytes, data); err != nil {
+	if err := json.Unmarshal(bytes, data); err != nil {
 		return err
 	}
 
@@ -214,7 +206,7 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 func (f *UniqueStorage) Persist(sink raft.SnapshotSink) error {
 	fmt.Printf("Persist running")
 	err := func() error {
-		b, err := proto.Marshal(f)
+		b, err := json.Marshal(f)
 		if err != nil {
 			log.Printf("Error in Persist Marshal %v\n", err)
 			return err

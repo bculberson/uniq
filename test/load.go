@@ -1,8 +1,7 @@
-package httpd
+package main
 
 import (
 	"time"
-	"strconv"
 	"sync"
 	"math/rand"
 	"net/http"
@@ -11,7 +10,10 @@ import (
 	"log"
 	"io/ioutil"
 	"math"
+	"gopkg.in/alecthomas/kingpin.v2"
+	"encoding/json"
 )
+
 
 type loadResults struct {
 	MinimumBatchTime float64
@@ -25,28 +27,19 @@ type loadResults struct {
 	Collisions       int32
 }
 
-func (s *Service) startLoadTesting(concurrency, number string) (*loadResults, error) {
-	results := &loadResults{}
-	c, err := strconv.Atoi(concurrency)
-	if err != nil {
-		return results, err
-	}
-	results.Concurrency = c
-	n, err := strconv.Atoi(number)
-	if err != nil {
-		return results, err
-	}
-	results.Batches = int(math.Ceil(float64(n) / float64(c)))
-	results.BatchSize = n / results.Batches
 
-	err = s.load(results)
+func startLoadTesting(concurrency int, number int) (*loadResults, error) {
+	results := &loadResults{}
+	results.Concurrency = concurrency
+	results.Batches = int(math.Ceil(float64(number) / float64(concurrency)))
+	results.BatchSize = number / results.Batches
+
+	err := load(results)
 	return results, err
 }
 
-func (s *Service) load(results *loadResults) error {
+func load(results *loadResults) error {
 	start := time.Now()
-	uri := fmt.Sprintf("http://%s/cns", s.addr)
-
 	for batch := 0; batch < results.Batches; batch++ {
 		wg := sync.WaitGroup{}
 		wg.Add(results.BatchSize)
@@ -57,7 +50,7 @@ func (s *Service) load(results *loadResults) error {
 				defer wg.Done()
 
 				key := randStringBytesMaskImprSrc(22)
-				reqUri := fmt.Sprintf("%s?key=%s&duration=3600s", uri, key)
+				reqUri := fmt.Sprintf("%s?key=%s&duration=3600s", *uri, key)
 				req, err := http.NewRequest("POST", reqUri, nil)
 				if err != nil {
 					log.Printf("Error from new request %v", err)
@@ -124,4 +117,18 @@ func randStringBytesMaskImprSrc(n int) string {
 	}
 
 	return string(b)
+}
+
+var (
+	number = kingpin.Flag("n", "Number to insert").Default("10000").Int()
+	concurrency = kingpin.Flag("c", "Concurrency").Default("50").Int()
+	uri = kingpin.Flag("uri", "Uri to endpoint").Default("http://127.0.0.1:11111/cns").String()
+)
+
+func main() {
+	kingpin.Parse()
+	results, _ := startLoadTesting(*concurrency, *number)
+	output, _ := json.MarshalIndent(results, "", "\t")
+	fmt.Println(string(output))
+
 }

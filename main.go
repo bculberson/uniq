@@ -8,12 +8,12 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"time"
 
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/bculberson/uniq/httpd"
 	"github.com/bculberson/uniq/store"
-	"time"
 )
 
 var (
