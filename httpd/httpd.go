@@ -7,12 +7,14 @@ import (
 	"os"
 	"time"
 	_ "net/http/pprof"
+	"fmt"
 )
 
 var logger = log.New(os.Stderr, "[httpd] ", log.LstdFlags)
 
 type Store interface {
 	CheckNSet(key string, value string, expiration time.Time) (bool, string, error)
+	Count() (int)
 	Join(addr string) error
 	IsLeader() bool
 }
@@ -32,6 +34,7 @@ func New(addr string, store Store) *Service {
 
 func (s *Service) Start() error {
 	go func() {
+		http.HandleFunc("/count", s.countHandler)
 		http.HandleFunc("/check", s.checkHandler)
 		http.HandleFunc("/join", s.joinHandler)
 		http.HandleFunc("/cns", s.cnsHandler)
@@ -47,6 +50,11 @@ func (s *Service) Start() error {
 func (s *Service) Close() {
 	s.ln.Close()
 	return
+}
+
+func (s *Service) countHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf("Count: %d\n", s.store.Count())))
 }
 
 func (s *Service) checkHandler(w http.ResponseWriter, r *http.Request) {

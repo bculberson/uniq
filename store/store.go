@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
 	"encoding/json"
+
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
 )
@@ -24,7 +24,7 @@ const (
 var (
 	logger        = log.New(os.Stderr, "[store] ", log.LstdFlags)
 	storageUnique = struct {
-		sync.Mutex
+		sync.RWMutex
 		m map[string]*UniqueStorageValue
 	}{
 		m: make(map[string]*UniqueStorageValue),
@@ -90,6 +90,12 @@ func (s *Store) Open() error {
 	return nil
 }
 
+func (s *Store) Count() int {
+	storageUnique.Lock()
+	storageUnique.Unlock()
+	return len(storageUnique.m)
+}
+
 func (s *Store) CheckNSet(key string, value string, expiration time.Time) (bool, string, error) {
 	if s.raft.State() != raft.Leader {
 		return false, "", fmt.Errorf("not leader")
@@ -145,7 +151,7 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 
 	if msg.Operation == MessageValue_CAS {
 		storageUnique.Lock()
-		defer storageUnique.Unlock()
+		storageUnique.Unlock()
 		storageValue, ok := storageUnique.m[msg.Key]
 		if !ok {
 			if msg.Expiration > uint32(time.Now().Unix()) {
