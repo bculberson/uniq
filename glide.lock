@@ -1,5 +1,5 @@
-hash: f968aeb07e5c65bf153dd9a31aa1405a4fb1d1809d08696cb78319c28b8418fb
-updated: 2017-03-14T21:51:25.95036463-06:00
+hash: 5c2faf664b180047cecb86f831e41a1d20482dc36d673204991b5ca4d51cf6ec
+updated: 2017-03-19T17:44:23.811591319-06:00
 imports:
 - name: github.com/alecthomas/template
   version: a0175ee3bccc567396460bf5acd36800cb10c49c
@@ -11,6 +11,10 @@ imports:
   version: 93f237eba9b0602f3e73710416558854a81d9337
 - name: github.com/boltdb/bolt
   version: 583e8937c61f1af6513608ccc75c97b6abdf4ff9
+- name: github.com/golang/protobuf
+  version: c9c7427a2a70d2eb3bafa0ab2dc163e45f143317
+  subpackages:
+  - proto
 - name: github.com/hashicorp/go-msgpack
   version: fa3f63826f7c23912c15263591e65d54d080b458
   subpackages:
