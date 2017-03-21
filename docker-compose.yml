@@ -18,6 +18,8 @@ services:
       main:
         aliases:
           - uniq1
+    ports:
+      - "11111:11111"
     volumes:
       - ".:/usr/local/go/src/github.com/bculberson/uniq:rw"
     command: bash -c "go run main.go -s --haddr uniq1:11111 --raddr uniq1:11112"
@@ -29,6 +31,8 @@ services:
       main:
         aliases:
           - uniq2
+    ports:
+      - "11113:11113"
     volumes:
       - ".:/usr/local/go/src/github.com/bculberson/uniq:rw"
     command: bash -c "sleep 4 && go run main.go --join proxy:11110 --haddr uniq2:11113 --raddr uniq2:11114"
@@ -40,6 +44,8 @@ services:
       main:
         aliases:
           - uniq3
+    ports:
+      - "11115:11115"
     volumes:
       - ".:/usr/local/go/src/github.com/bculberson/uniq:rw"
     command: bash -c "sleep 4 && go run main.go --join proxy:11110 --haddr uniq3:11115 --raddr uniq3:11116"
