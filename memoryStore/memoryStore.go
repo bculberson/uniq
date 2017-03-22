@@ -1,4 +1,4 @@
-package store
+package memoryStore
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	logger        = log.New(os.Stderr, "[store] ", log.LstdFlags)
+	logger        = log.New(os.Stderr, "[memoryStore] ", log.LstdFlags)
 	storageUnique = struct {
 		sync.RWMutex
 		m map[string]*UniqueStorageValue
@@ -39,7 +39,6 @@ type Store struct {
 	storagePath string
 	raftAddress string
 	singleMode  bool
-	currentLdr  string
 
 	raft        *raft.Raft
 	pendingCh   chan *MessageValue
@@ -95,12 +94,12 @@ func (s *Store) Open() error {
 
 	snapshots, err := raft.NewFileSnapshotStore(s.storagePath, retainSnapshotCount, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("file snapshot store: %s", err)
+		return fmt.Errorf("file snapshot memoryStore: %s", err)
 	}
 
 	logStore, err := raftboltdb.NewBoltStore(filepath.Join(s.storagePath, "raft.log.db"))
 	if err != nil {
-		return fmt.Errorf("new bolt store: %s", err)
+		return fmt.Errorf("new bolt memoryStore: %s", err)
 	}
 
 	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, logStore, snapshots, peerStore, transport)

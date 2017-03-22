@@ -1,5 +1,5 @@
 syntax = "proto3";
-package store;
+package memoryStore;
 
 message UniqueStorageValue {
     string value = 1;

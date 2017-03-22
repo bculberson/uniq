@@ -1,9 +1,9 @@
 package: github.com/bculberson/uniq
 import:
+- package: github.com/boltdb/bolt
 - package: github.com/golang/protobuf
   subpackages:
   - proto
 - package: github.com/hashicorp/raft
 - package: github.com/hashicorp/raft-boltdb
 - package: gopkg.in/alecthomas/kingpin.v2
-  version: ^2.2.3

@@ -13,7 +13,8 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/bculberson/uniq/httpd"
-	"github.com/bculberson/uniq/store"
+	"github.com/bculberson/uniq/memoryStore"
+	"github.com/bculberson/uniq/diskStore"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 	storagePath = kingpin.Flag("storagepath", "Storage path").Default("/tmp").String()
 	httpAddress = kingpin.Flag("haddr", "Address for HTTP binding").Default("127.0.0.1:11111").String()
 	raftAddress = kingpin.Flag("raddr", "Address for RAFT binding").Default("127.0.0.1:11112").String()
+	useDisk = kingpin.Flag("diskmode", "Disk mode").Short('d').Bool()
 	logger      = log.New(os.Stderr, "[main] ", log.LstdFlags)
 )
 
@@ -32,9 +34,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := store.New(*storagePath, *raftAddress, *singleMode)
-	if err := s.Open(); err != nil {
-		logger.Fatalf("failed to open store: %s", err.Error())
+	var s httpd.Store
+	if *useDisk == true {
+		ds := diskStore.New(*storagePath, *raftAddress, *singleMode)
+		if err := ds.Open(); err != nil {
+			logger.Fatalf("failed to open diskStore: %s", err.Error())
+		}
+		s = ds
+	} else {
+		ms := memoryStore.New(*storagePath, *raftAddress, *singleMode)
+		if err := ms.Open(); err != nil {
+			logger.Fatalf("failed to open memoryStore: %s", err.Error())
+		}
+		s = ms
 	}
 
 	if *joinAddress != "" {
